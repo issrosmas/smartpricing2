@@ -2,5 +2,7 @@
   "name": "Kumoten Smart Pricing Portal",
   "description": "Automated multi-platform profit comparison and smart floor-price calculator for Malaysian dropshippers on Shopee, Lazada, and TikTok Shop.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

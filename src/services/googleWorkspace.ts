@@ -24,7 +24,6 @@ export const initGoogleAuth = (
       if (cachedAccessToken) {
         onSuccess(user, cachedAccessToken);
       } else if (!isSigningIn) {
-        // Try to get fresh credential if possible, or trigger sign-in
         onFailure();
       }
     } else {
@@ -59,6 +58,17 @@ export const logoutGoogleWorkspace = async () => {
   cachedAccessToken = null;
 };
 
+// --- Helper to extract Spreadsheet ID from URL or return ID directly ---
+export function extractSpreadsheetId(input: string): string {
+  const trimmed = input.trim();
+  // Match /d/([a-zA-Z0-9-_]+)
+  const match = trimmed.match(/\/d\/([a-zA-Z0-9-_]+)/);
+  if (match && match[1]) {
+    return match[1];
+  }
+  return trimmed;
+}
+
 // --- Google Sheets Integration ---
 export async function createOrAppendToSpreadsheet(accessToken: string, leadData: {
   fullName: string;
@@ -67,9 +77,10 @@ export async function createOrAppendToSpreadsheet(accessToken: string, leadData:
   experienceLevel: string;
   platforms: string[];
   ticketId: string;
-}, spreadsheetId?: string): Promise<{ spreadsheetId: string; spreadsheetUrl: string }> {
+}, customSpreadsheetInput?: string): Promise<{ spreadsheetId: string; spreadsheetUrl: string }> {
+  let targetId = customSpreadsheetInput ? extractSpreadsheetId(customSpreadsheetInput) : undefined;
+
   // If we don't have a spreadsheetId, let's create a new Google Sheet
-  let targetId = spreadsheetId;
   if (!targetId) {
     const createRes = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
       method: 'POST',
@@ -100,29 +111,29 @@ export async function createOrAppendToSpreadsheet(accessToken: string, leadData:
     targetId = sheetJson.spreadsheetId;
 
     // Add header row
-    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${targetId}/values/VIP!A1:F1?valueInputOption=USER_ENTERED`, {
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${targetId}/values/A1:F1?valueInputOption=USER_ENTERED`, {
       method: 'PUT',
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        range: 'VIP!A1:F1',
+        range: 'A1:F1',
         majorDimension: 'ROWS',
         values: [['Ticket ID', 'Full Name', 'WhatsApp', 'Email', 'Experience Level', 'Platforms']]
       })
     });
   }
 
-  // Append lead data
-  const appendRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${targetId}/values/VIP!A:F:append?valueInputOption=USER_ENTERED`, {
+  // Append lead data (try range A:F or Sheet1!A:F)
+  const appendRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${targetId}/values/A:F:append?valueInputOption=USER_ENTERED`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      range: 'VIP!A:F',
+      range: 'A:F',
       majorDimension: 'ROWS',
       values: [[
         leadData.ticketId,
@@ -192,7 +203,6 @@ export async function exportCheatSheetToDrive(accessToken: string): Promise<{ fi
 
   const data = await res.json();
   
-  // Get webViewLink
   const getRes = await fetch(`https://www.googleapis.com/drive/v3/files/${data.id}?fields=webViewLink`, {
     headers: {
       Authorization: `Bearer ${accessToken}`

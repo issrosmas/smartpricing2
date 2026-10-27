@@ -9,11 +9,15 @@ import {
   Clock, 
   Award, 
   ChevronDown,
-  UserCheck
+  FileSpreadsheet,
+  Mail,
+  ExternalLink
 } from 'lucide-react';
 import { EarlyAccessLead } from '../types/index.ts';
+import { getCachedAccessToken, signInWithGoogleWorkspace, createOrAppendToSpreadsheet, sendWelcomeEmailViaGmail } from '../services/googleWorkspace.ts';
 
 const STORAGE_KEY = 'kumoten_smart_pricing_vip_lead';
+const CUSTOM_SHEET_KEY = 'kumoten_custom_spreadsheet_url';
 
 export const EarlyAccessForm: React.FC = () => {
   const [fullName, setFullName] = useState('');
@@ -26,6 +30,8 @@ export const EarlyAccessForm: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [submittedLead, setSubmittedLead] = useState<EarlyAccessLead | null>(null);
   const [formError, setFormError] = useState('');
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
+  const [sheetUrl, setSheetUrl] = useState<string | null>(null);
 
   // Load existing VIP ticket from localStorage if already registered
   useEffect(() => {
@@ -33,6 +39,10 @@ export const EarlyAccessForm: React.FC = () => {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         setSubmittedLead(JSON.parse(saved));
+      }
+      const customSheet = localStorage.getItem(CUSTOM_SHEET_KEY);
+      if (customSheet) {
+        setSheetUrl(customSheet);
       }
     } catch (e) {
       console.error('Failed to load lead from storage', e);
@@ -49,9 +59,39 @@ export const EarlyAccessForm: React.FC = () => {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const executeGoogleSync = async (lead: EarlyAccessLead) => {
+    setSyncStatus('Connecting to Google Workspace and pushing to your Spreadsheet...');
+    try {
+      let token = getCachedAccessToken();
+      if (!token) {
+        const authRes = await signInWithGoogleWorkspace();
+        token = authRes.accessToken;
+      }
+
+      const customSheet = localStorage.getItem(CUSTOM_SHEET_KEY) || undefined;
+
+      // 1. Create or Append to Google Sheet (using custom URL if provided)
+      const sheetRes = await createOrAppendToSpreadsheet(token, lead, customSheet);
+      setSheetUrl(sheetRes.spreadsheetUrl);
+
+      // 2. Send Welcome Email via Gmail
+      try {
+        await sendWelcomeEmailViaGmail(token, lead.email, lead.fullName, lead.ticketId);
+      } catch (mailErr) {
+        console.error('Gmail send error:', mailErr);
+      }
+
+      setSyncStatus('Success! Lead captured into your Google Spreadsheet & Welcome email sent via Gmail.');
+    } catch (err: any) {
+      console.error('Google sync error:', err);
+      setSyncStatus(`VIP Pass saved locally. (Google Sync note: ${err?.message || 'Cancelled or requires permission'})`);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
+    setSyncStatus(null);
 
     if (!fullName.trim()) {
       setFormError('Please enter your full name.');
@@ -68,8 +108,7 @@ export const EarlyAccessForm: React.FC = () => {
 
     setIsLoading(true);
 
-    // Simulate quick server verification
-    setTimeout(() => {
+    try {
       const ticketNumber = Math.floor(1000 + Math.random() * 9000);
       const newLead: EarlyAccessLead = {
         fullName: fullName.trim(),
@@ -86,15 +125,29 @@ export const EarlyAccessForm: React.FC = () => {
         ticketId: `VIP-${ticketNumber}`
       };
 
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(newLead));
-      } catch (err) {
-        console.error('Storage error', err);
-      }
-
+      // Save locally
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(newLead));
       setSubmittedLead(newLead);
+
+      // Attempt automatic Google Sheet sync if token exists, or prompt
+      const token = getCachedAccessToken();
+      if (token) {
+        await executeGoogleSync(newLead);
+      } else {
+        setSyncStatus('VIP Pass secured! Click below to push data directly into your Google Spreadsheet.');
+      }
+    } catch (err: any) {
+      setFormError(err?.message || 'Failed to submit form.');
+    } finally {
       setIsLoading(false);
-    }, 700);
+    }
+  };
+
+  const handleManualSync = async () => {
+    if (!submittedLead) return;
+    setIsLoading(true);
+    await executeGoogleSync(submittedLead);
+    setIsLoading(false);
   };
 
   const handleShareToWhatsApp = () => {
@@ -125,6 +178,39 @@ export const EarlyAccessForm: React.FC = () => {
               <p className="text-sm sm:text-base text-[#665555] max-w-xl mx-auto">
                 Your VIP Early Access spot is secured. We will WhatsApp you at <strong className="text-[#315b8c]">{submittedLead.whatsapp}</strong> when beta invitations roll out.
               </p>
+            </div>
+
+            {/* Google Sheets Sync Status & Button */}
+            <div className="max-w-md mx-auto p-4 rounded-2xl bg-[#e8f0f8] border border-[#315b8c]/30 text-left space-y-3">
+              <div className="flex items-center gap-2 text-xs font-bold text-[#315b8c]">
+                <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
+                <span>Google Spreadsheet Capture Status:</span>
+              </div>
+              <p className="text-xs text-[#665555]">
+                {syncStatus || 'Ready to capture lead data into your Google Spreadsheet and send welcome email via Gmail.'}
+              </p>
+
+              {sheetUrl ? (
+                <a
+                  href={sheetUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs font-black bg-emerald-700 text-white px-4 py-2 rounded-xl shadow-xs hover:bg-emerald-800 transition-colors"
+                >
+                  <span>Open Linked Google Sheet</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleManualSync}
+                  disabled={isLoading}
+                  className="w-full py-2.5 px-4 rounded-xl bg-[#315b8c] hover:bg-[#254770] text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span>{isLoading ? 'Connecting & Syncing...' : 'Connect Google & Push to Your Spreadsheet'}</span>
+                </button>
+              )}
             </div>
 
             {/* Simulated VIP Ticket Pass */}
@@ -169,28 +255,6 @@ export const EarlyAccessForm: React.FC = () => {
               </div>
             </div>
 
-            {/* Perks Included List */}
-            <div className="bg-[#f5ebdd]/70 rounded-2xl p-5 border border-[#dfcfba] max-w-lg mx-auto text-left space-y-3">
-              <h4 className="text-xs font-black uppercase tracking-wider text-[#315b8c] flex items-center gap-1.5">
-                <Gift className="w-4 h-4 text-[#f2765e]" />
-                Your VIP Membership Perks:
-              </h4>
-              <ul className="text-xs space-y-2 text-[#413333]">
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                  <span><strong>3 Months Free Full Portal Access</strong> when we launch.</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                  <span><strong>Free PDF Cheat-sheet:</strong> "Top 50 High-Margin Malaysian Dropship Items (2025/2026)" sent straight to your email.</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                  <span><strong>Private WhatsApp Group Invite:</strong> Marketplace fee alerts & price war strategies with other top Malaysian sellers.</span>
-                </li>
-              </ul>
-            </div>
-
             {/* Action buttons */}
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
               <button
@@ -205,6 +269,7 @@ export const EarlyAccessForm: React.FC = () => {
                 onClick={() => {
                   localStorage.removeItem(STORAGE_KEY);
                   setSubmittedLead(null);
+                  setSheetUrl(null);
                 }}
                 className="text-xs text-[#665555] hover:text-[#413333] underline py-2 cursor-pointer"
               >
@@ -393,7 +458,7 @@ export const EarlyAccessForm: React.FC = () => {
                   {isLoading ? (
                     <div className="flex items-center gap-2">
                       <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>Securing Your VIP Pass...</span>
+                      <span>Capturing to Spreadsheet & Securing Pass...</span>
                     </div>
                   ) : (
                     <>
@@ -411,7 +476,7 @@ export const EarlyAccessForm: React.FC = () => {
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" /> No credit card needed
                 </span>
                 <span className="flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5 text-[#315b8c]" /> Instant confirmation
+                  <Clock className="w-3.5 h-3.5 text-[#315b8c]" /> Instant spreadsheet sync
                 </span>
                 <span className="flex items-center gap-1">
                   <Award className="w-3.5 h-3.5 text-[#f2765e]" /> Free 3-month VIP tier

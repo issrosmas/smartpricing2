@@ -9,7 +9,7 @@ import {
   getCachedAccessToken
 } from '../services/googleWorkspace.ts';
 import { User } from 'firebase/auth';
-import { Mail, FileSpreadsheet, HardDrive, CheckCircle2, ShieldCheck, Sparkles, RefreshCw, LogOut, ExternalLink } from 'lucide-react';
+import { Mail, FileSpreadsheet, HardDrive, CheckCircle2, ShieldCheck, Sparkles, RefreshCw, LogOut, ExternalLink, Link as LinkIcon, Check } from 'lucide-react';
 
 interface GoogleWorkspacePanelProps {
   lastLeadData?: {
@@ -22,15 +22,30 @@ interface GoogleWorkspacePanelProps {
   } | null;
 }
 
+const CUSTOM_SHEET_KEY = 'kumoten_custom_spreadsheet_url';
+
 export const GoogleWorkspacePanel: React.FC<GoogleWorkspacePanelProps> = ({ lastLeadData }) => {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
-  const [sheetInfo, setSheetInfo] = useState<{ id: string; url: string } | null>(null);
+  
+  const [customSheetUrlInput, setCustomSheetUrlInput] = useState('');
+  const [savedSheetUrl, setSavedSheetUrl] = useState('');
+  
   const [driveInfo, setDriveInfo] = useState<{ id: string; url: string } | null>(null);
 
   useEffect(() => {
+    try {
+      const stored = localStorage.getItem(CUSTOM_SHEET_KEY);
+      if (stored) {
+        setCustomSheetUrlInput(stored);
+        setSavedSheetUrl(stored);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
     const unsubscribe = initGoogleAuth(
       (currentUser, accessToken) => {
         setUser(currentUser);
@@ -43,6 +58,18 @@ export const GoogleWorkspacePanel: React.FC<GoogleWorkspacePanelProps> = ({ last
     );
     return () => unsubscribe();
   }, []);
+
+  const handleSaveCustomSheet = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = customSheetUrlInput.trim();
+    try {
+      localStorage.setItem(CUSTOM_SHEET_KEY, trimmed);
+      setSavedSheetUrl(trimmed);
+      setStatusMessage({ type: 'success', text: trimmed ? 'Custom Google Sheet URL saved successfully! Form submissions will now append to this sheet.' : 'Custom sheet URL cleared. New sheets will be created automatically.' });
+    } catch (err) {
+      setStatusMessage({ type: 'error', text: 'Failed to save spreadsheet URL to browser storage.' });
+    }
+  };
 
   const handleSignIn = async () => {
     setIsLoading(true);
@@ -79,9 +106,13 @@ export const GoogleWorkspacePanel: React.FC<GoogleWorkspacePanelProps> = ({ last
         platforms: ['Shopee', 'TikTok Shop'],
         ticketId: 'VIP-9999'
       };
-      const res = await createOrAppendToSpreadsheet(token, lead, sheetInfo?.id);
-      setSheetInfo({ id: res.spreadsheetId, url: res.spreadsheetUrl });
-      setStatusMessage({ type: 'success', text: 'Successfully synced VIP lead to Google Sheets!' });
+      const customUrl = localStorage.getItem(CUSTOM_SHEET_KEY) || undefined;
+      const res = await createOrAppendToSpreadsheet(token, lead, customUrl);
+      if (!savedSheetUrl && !customUrl) {
+        setSavedSheetUrl(res.spreadsheetUrl);
+        localStorage.setItem(CUSTOM_SHEET_KEY, res.spreadsheetUrl);
+      }
+      setStatusMessage({ type: 'success', text: 'Successfully synced VIP lead to Google Sheet!' });
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err?.message || 'Failed to sync to Google Sheets.' });
     } finally {
@@ -147,7 +178,7 @@ export const GoogleWorkspacePanel: React.FC<GoogleWorkspacePanelProps> = ({ last
                   Connect Website to Gmail, Sheets & Drive
                 </h3>
                 <p className="text-xs sm:text-sm text-[#665555]">
-                  Automatically sync leads to Google Sheets, export profit cheat-sheets to Google Drive, and dispatch VIP welcome emails via Gmail.
+                  Automatically capture form submissions to your Google Spreadsheet, export profit cheat-sheets to Google Drive, and dispatch VIP welcome emails via Gmail.
                 </p>
               </div>
             </div>
@@ -209,9 +240,49 @@ export const GoogleWorkspacePanel: React.FC<GoogleWorkspacePanelProps> = ({ last
             </div>
           )}
 
+          {/* Custom Spreadsheet URL Configuration Box */}
+          <div className="mt-6 p-5 bg-[#f5ebdd]/70 rounded-2xl border border-[#dfcfba]">
+            <h4 className="font-black text-sm text-[#413333] mb-2 flex items-center gap-2">
+              <LinkIcon className="w-4 h-4 text-[#315b8c]" />
+              Link Your Existing Google Spreadsheet URL
+            </h4>
+            <p className="text-xs text-[#665555] mb-3">
+              Paste your existing Google Sheet URL below. When users submit the Early Access form, data will automatically append as a new row to your sheet.
+            </p>
+            <form onSubmit={handleSaveCustomSheet} className="flex flex-col sm:flex-row gap-3">
+              <input
+                type="url"
+                value={customSheetUrlInput}
+                onChange={(e) => setCustomSheetUrlInput(e.target.value)}
+                placeholder="https://docs.google.com/spreadsheets/d/YOUR_SPREADSHEET_ID/edit"
+                className="flex-1 px-4 py-2.5 bg-white border border-[#dfcfba] rounded-xl text-xs font-medium text-[#413333] focus:border-[#315b8c] focus:outline-none"
+              />
+              <button
+                type="submit"
+                className="py-2.5 px-5 rounded-xl bg-[#315b8c] hover:bg-[#254770] text-white font-bold text-xs shadow-md transition-all cursor-pointer shrink-0 flex items-center justify-center gap-1.5"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Save Sheet Link</span>
+              </button>
+            </form>
+            {savedSheetUrl && (
+              <div className="mt-3 flex items-center justify-between text-xs text-emerald-800 bg-emerald-50 p-2.5 rounded-xl border border-emerald-200">
+                <span className="truncate">🔗 Linked Sheet: {savedSheetUrl}</span>
+                <a
+                  href={savedSheetUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-bold underline shrink-0 ml-2"
+                >
+                  Open Sheet ↗
+                </a>
+              </div>
+            )}
+          </div>
+
           {/* Integration Action Cards */}
           {user ? (
-            <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
               
               {/* Google Sheets Sync Card */}
               <div className="bg-[#f5ebdd]/70 p-5 rounded-2xl border border-[#dfcfba] flex flex-col justify-between">
@@ -221,11 +292,11 @@ export const GoogleWorkspacePanel: React.FC<GoogleWorkspacePanelProps> = ({ last
                     <h4 className="font-extrabold text-sm text-[#413333]">Google Sheets Sync</h4>
                   </div>
                   <p className="text-xs text-[#665555] mb-4">
-                    Instantly create or append VIP leads and pricing calculation logs to your Google Sheets.
+                    Instantly sync test lead data to your linked Google Spreadsheet.
                   </p>
-                  {sheetInfo && (
+                  {savedSheetUrl && (
                     <a
-                      href={sheetInfo.url}
+                      href={savedSheetUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1.5 text-xs font-bold text-[#315b8c] underline mb-4"
@@ -242,7 +313,7 @@ export const GoogleWorkspacePanel: React.FC<GoogleWorkspacePanelProps> = ({ last
                   className="w-full py-2.5 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                 >
                   <FileSpreadsheet className="w-4 h-4" />
-                  <span>Sync Lead to Sheets</span>
+                  <span>Sync Test Lead to Sheet</span>
                 </button>
               </div>
 
