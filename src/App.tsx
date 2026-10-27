@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { Navbar } from './components/Navbar.tsx';
 import { Hero } from './components/Hero.tsx';
 import { TeaserProfitCalculator } from './components/TeaserProfitCalculator.tsx';
@@ -6,11 +6,25 @@ import { FeatureGrid } from './components/FeatureGrid.tsx';
 import { AudienceSection } from './components/AudienceSection.tsx';
 import { HowItWorks } from './components/HowItWorks.tsx';
 import { EarlyAccessForm } from './components/EarlyAccessForm.tsx';
+import { GoogleWorkspacePanel } from './components/GoogleWorkspacePanel.tsx';
 import { FaqSection } from './components/FaqSection.tsx';
 import { Footer } from './components/Footer.tsx';
 import { Calculator, Sparkles } from 'lucide-react';
 
 export default function App() {
+  const [lastLead, setLastLead] = useState<any>(null);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('kumoten_smart_pricing_vip_lead');
+      if (saved) {
+        setLastLead(JSON.parse(saved));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
   const scrollToSection = useCallback((id: string) => {
     const el = document.getElementById(id);
     if (el) {
@@ -43,7 +57,10 @@ export default function App() {
         {/* 6. Early Access VIP Contact Form (Main Lead Capture) */}
         <EarlyAccessForm />
 
-        {/* 7. Frequently Asked Questions */}
+        {/* 7. Google Workspace Integration Panel (Gmail, Sheets, Drive) */}
+        <GoogleWorkspacePanel lastLeadData={lastLead} />
+
+        {/* 8. Frequently Asked Questions */}
         <FaqSection />
       </main>
 
